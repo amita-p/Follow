@@ -4,7 +4,11 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Point;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.support.v4.content.res.ResourcesCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -25,18 +29,16 @@ import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity  {
     //VARIABLES ASSOCIATED WITH THIS ENTIRE CLASS
-    static int numPathTypes=4; //Numbers of different path types
-    static int numChange;
-    static float spaceBetween; //Space (in y dir) between each dot (in PX!!)
-    static double period = 0.1; //period of the sin function, IN DOTS!!
-    static float dpSpeed = (float)3.5; //how fast dots move downward, in DP
+    static float spaceBetween; //Space (in both x and y dir) between each dot (in PX!!)
+    static float xSpaceBetween;//Space (in y dir) between each dot (in PX!!)
+    static float dpSpeed = (float)2; //how fast dots move downward, in DP, can't exceed a certain value, otherwise more than one dot will need to be created each time
     static float pixelSpeed; //how fast dots move downward, in PX
     static float prevX; //prevX and prevY are variables needed to move the black dot with the finger
     static float prevY;
     static int screenHeight;//IN PX
     static int screenWidth;//IN PX
     static int numDots; //number of dots in existance at a given time, always constant
-    static int xDots=0; //used to keep track of dots as an x value for the functions, goes back to zero at the start of a new function
+    static double xDots=0; //used to keep track of dots as an x value for the functions, goes back to zero at the start of a new function
     static ArrayList<View> path = new ArrayList<View>(); //arraylist of dots in the path, dots get removed and added from list as they move downward
     static Drawable dotDrawable; //drawable object for a dot
     static Drawable circleDrawable;//circle object for a dot
@@ -45,22 +47,19 @@ public class MainActivity extends AppCompatActivity  {
     static RelativeLayout layout;//relative layout which everything on the screen is in
     static Context context; //context of the decorview of the window
     static int counter=0; //counts how many times the run method has run sp far
-    static boolean increaseAmplitude=true; //increaseAmplitude and reduceAmplitude are boolean variables for the sine function
-    static boolean reduceAmplitude=false;
-    static int duration; //duration of a certain period
-    static int startCounter;
+    static int startCounter; //every time we create a new path, we set this equal to 0 to monitor the duration of the path
     static boolean newPathNeedsToBeDecided=true; //set to true when a certain path finishes, initially true
-    static boolean pathOffCentre=false;
-    static String lastPathDirection="straight"; //can be either left, right, or straight
-    static int numIterToCreateNewDot;
-    static String pathType="straight";
-    public static Path currentPath;
-    public static int maxPossibleDuration=1501; //THIS NUMBER NEEDS TO BE CHECKED!!
-    public static int maxDuration;
-    public static float centreInPixels;
+    static String pathType="sine"; //initially, the path will be sine
+    public static int maxDuration; //the maximum duration of the current path
+    public static float centreInPixels; //x value for the dot drawable such that it is directly in the middle of the screen (x), in PX!!
     public static float lastX; //in pixels!!
-    public static float zeroX; //in pixels!!
+    public static float lastY; //in pixels!!
+    public static float zeroX; //in pixels!! //the zero value for the path
     public static float padding; //in pixels!!, this determines how close the path can get to the edge of the screen
+    public static int dotColor=Color.RED;
+    public static double xDotIncrement=1;
+    public static boolean touchedRightEdge=false;
+    public static boolean touchedLeftEdge=false;
 
     //parameters for diagonal path
     public static double diagonalPathSlope;
@@ -68,6 +67,9 @@ public class MainActivity extends AppCompatActivity  {
     //parameters for sine path
     public static int sinePeriod; //IN DOTS!
     public static float sineAmplitude; //IN DP!!
+
+    //parameters for circles path
+    public static float circlesRadius; //IN DP!!
 
 
     @Override
@@ -83,55 +85,72 @@ public class MainActivity extends AppCompatActivity  {
         //drawable objects, dimensions are specified in the xml
         circleDrawable = ResourcesCompat.getDrawable(getResources(), R.drawable.circle, null);
         dotDrawable = ResourcesCompat.getDrawable(getResources(), R.drawable.dot, null);
-        //in PIXELS!
-        spaceBetween = dotDrawable.getIntrinsicHeight()/2;
 
-        /* pixelSpeed is not a direct conversion of dpSpeed to pixels, but is the closest it can be, such that
-         * (dotHeight+spaceBetween)/pixelSpeed is a whole number. Since the dots move down pixelSpeed pixels every time the run
-         * method is executed, a new dot needs to be created every (dotHeight+spaceBetween)/pixelSpeed times the run method is run
-         * As a result, (dotHeight+spaceBetween)/pixelSpeed has to be a whole number.
-         * pixelSpeed cannot be greater than (dotHeight+spaceBetween)*2, otherwise, it'll end up being infinity
-         */
+        //in PIXELS!
+        spaceBetween = dotDrawable.getIntrinsicHeight()*2;
+        xSpaceBetween = 0;
+
+
         pixelSpeed = (convertDpToPixel(dpSpeed, context));
-        if ((Math.round((dotDrawable.getIntrinsicHeight()+ spaceBetween)/pixelSpeed))>=2){
-            pixelSpeed = ((dotDrawable.getIntrinsicHeight()+ spaceBetween)/(Math.round((dotDrawable.getIntrinsicHeight()+ spaceBetween)/pixelSpeed)));
-        }
-        else{
-            pixelSpeed = ((dotDrawable.getIntrinsicHeight()+ spaceBetween))/2;
-        }
 
         //width and height of the screen in PIXELS
         screenWidth = getApplicationContext().getResources().getDisplayMetrics().widthPixels;
         screenHeight = getApplicationContext().getResources().getDisplayMetrics().heightPixels;
 
+        lastY=screenHeight;
+
         //setting the padding
-        padding=(float)(0.5*screenWidth*0.8);
+        padding=(float)(0.5*screenWidth*0.1);
 
         //number of dots in existence at any given time
         numDots = (int)(screenHeight /(spaceBetween + dotDrawable.getIntrinsicHeight()))+2;
 
+
         centreInPixels=screenWidth / 2 - (dotDrawable.getIntrinsicWidth()) / 2;
+        zeroX=centreInPixels;
 
         /* setX and setY methods are in PIXELS
          *
          *
          */
-        sinePeriod=(int)(Math.random()*numDots+numDots/2);
-        sineAmplitude=convertPixelsToDp((float)(Math.random()*screenWidth/2), context);
-        //initially create numdots dot imageview objects and add them to the layout
-        for (int i = 0;i<numDots;i++){
+        sinePeriod=(numDots/2);
+        sineAmplitude=convertPixelsToDp((float)(screenWidth/4), context);
+
+
+        xDots=0;
+        dotColor=Color.RED;
+        xSpaceBetween=0;
+        //initially create 2000 dot imageview objects and add them to the layout
+        for (int i = 0;i<100;i++){
             ImageView dot = new ImageView(context);
-            dot.setImageResource(R.drawable.dot);
-            float a = convertDpToPixel(sineAmplitude*(float)Math.sin((2*Math.PI/sinePeriod)*(xDots)),context);
-            dot.setX(centreInPixels + a);
+            dot.setBackgroundResource(R.drawable.dot);
+            GradientDrawable bgShape = (GradientDrawable)dot.getBackground();
+            bgShape.setColor(dotColor);
+
+            float a = convertDpToPixel(function(xDots), context);
+
+            dot.setX(zeroX+a);
             lastX=dot.getX();
-            dot.setY(screenHeight-i*(spaceBetween+dotDrawable.getIntrinsicHeight()));
+            if(i!=0) {
+                dot.setY((float) (lastY - (xSpaceBetween + (xDotIncrement * dotDrawable.getIntrinsicHeight()))));
+            }
+            else{
+                dot.setY(screenHeight-dotDrawable.getIntrinsicHeight());
+            }
+            lastY=dot.getY();
 
             path.add(dot);
             layout.addView(dot);
 
-            xDots++;
+            xDotIncrement = getXDotIncrement();
+            xDots+=xDotIncrement;
+            xSpaceBetween=(float)(xDotIncrement*spaceBetween);
+
         }
+
+
+
+
 
         //Creating the circleView
         circleView = new ImageView(context);
@@ -145,8 +164,7 @@ public class MainActivity extends AppCompatActivity  {
         //Initially, the ball X value of the ball is the middle of the screen
         prevX = screenWidth/2-circleView.getWidth()/2;
 
-        //how often the run method removes a dot from the bottom and adds one to the top
-        numIterToCreateNewDot = (int)((dotDrawable.getIntrinsicHeight()+ spaceBetween)/pixelSpeed);
+
 
 
 
@@ -162,22 +180,13 @@ public class MainActivity extends AppCompatActivity  {
          * must ensure that path does not run off sides of screen
          *
         */
+
         handler = new Handler();
         final Runnable r = new Runnable() {
             public void run() {
                 counter++;
-                //System.out.println(counter);
-                //pathOffCentre and lastPathOffsetDirection
 
-                 /* paths with leadBack=true have a maxDuration of -1, meaning they can take as long as necessary to lead
-                  * back to the centre
-                  *
-                  *
-                  *
-                  *
-                  */
-
-                if ((counter-startCounter)<maxDuration && (convertDpToPixel(function(), context)*-1+zeroX) > 0 && (convertDpToPixel(function(), context)*-1+zeroX) < screenWidth){
+                if((counter-startCounter)<=maxDuration && ((convertDpToPixel(function(xDots), context)+zeroX) >= padding && pathType.equals("straight")==false) && ((convertDpToPixel(function(xDots), context)+zeroX) <= (screenWidth-padding)&&pathType.equals("straight")==false)){
                     newPathNeedsToBeDecided=false;
                 }
                 else{
@@ -186,23 +195,36 @@ public class MainActivity extends AppCompatActivity  {
 
                 //deciding on a new path type if a new path type needs to be decided upon
                 if (newPathNeedsToBeDecided){
-                    int a = (int)(Math.round(Math.random()*2));
+                    if(dotColor==Color.BLUE){
+                        dotColor=Color.RED;
+                    }
+                    else{
+                        dotColor=Color.BLUE;
+                    }
+                    int a = (int)(Math.round(Math.random()*3));
                     if (a==0){
                        pathType = "straight";
+                       maxDuration = (int)((Math.random()*50)+100);
                     }
                     else if (a==1){
                         pathType = "diagonal";
                         diagonalPathSlope=convertPixelsToDp((float)(Math.random()*dotDrawable.getIntrinsicHeight()*4-dotDrawable.getIntrinsicHeight()*2), context);
+                        maxDuration = (int)((Math.random()*50)+50);
                     }
                     else if (a==2){
                         pathType = "sine";
-                        sinePeriod=(int)(Math.random()*numDots+numDots/2);
+                        sinePeriod=(int)(Math.random()*(numDots/2)+numDots/2);
                         sineAmplitude=convertPixelsToDp((float)(Math.random()*screenWidth/2), context);
+                        maxDuration = (int)((Math.random()*100)+50);
                     }
+                    else if (a==3){
+                        pathType="circles";
+                        circlesRadius=convertPixelsToDp((float)(Math.random()*(screenWidth/3)),context);
+                        maxDuration=(int)(Math.random()*150+50);
+                    }
+
                     newPathNeedsToBeDecided=false;
-                    maxDuration = (int)((Math.random()*400)+100);
-                    System.out.println(pathType);
-                    System.out.println("max duration: "+maxDuration);
+
                     startCounter=counter;
                     xDots=0;
                     zeroX=lastX;
@@ -210,60 +232,34 @@ public class MainActivity extends AppCompatActivity  {
 
 
 
-
-
-
-                //if (path == )
-
-                    /*if (convertDpToPixel((float) amplitude, context) < (0.5 * 0.5 * screenWidth) && increaseAmplitude) {
-                        amplitude += 0.2;
-
-                    }
-                    else if (reduceAmplitude!= true) {
-                        increaseAmplitude = false;
-                        reduceAmplitude = true;
-                        numChange++;
-                    }
-
-                    if (convertDpToPixel((float) amplitude, context) > 0 && reduceAmplitude) {
-                        amplitude -= 0.2;
-
-                    } else if (increaseAmplitude!=true) {
-                        reduceAmplitude = false;
-                        increaseAmplitude = true;
-                        numChange++;
-                        if (numChange==2){
-                            numDots=0;
-                        }
-                    }*/
-
-
-
-
-
-
-
-                //creating a new dot at the top and removing a dot at the bottom
-                if (counter%numIterToCreateNewDot==0) {
-                    //create a new dot imageview
+                //create a dot if the last dot in the path has a y value greater than 0
+                if (path.get(path.size()-1).getY() > 0) {
                     ImageView dot = new ImageView(context);
-                    dot.setImageResource(R.drawable.dot);
+                    dot.setBackgroundResource(R.drawable.dot);
+                    GradientDrawable bgShape = (GradientDrawable)dot.getBackground();
+                    bgShape.setColor(dotColor);
 
+                    float a = convertDpToPixel(function(xDots), context);
 
-                    dot.setX(zeroX);
-
-
-                    float y = path.get(path.size() - 1).getY() - (spaceBetween + dotDrawable.getIntrinsicHeight());
-                    dot.setY((y));
-                    dot.setX(dot.getX()-convertDpToPixel(function(), context));
+                    dot.setX(zeroX+a);
                     lastX=dot.getX();
+                    if (xDots==0) {
+                        dot.setY((path.get(path.size() - 1).getY()));
+                    }
+                    else{
+                        dot.setY((float) (path.get(path.size() - 1).getY() - (xSpaceBetween + (xDotIncrement * dotDrawable.getIntrinsicHeight()))));
+                    }
 
-                    //add the imageview to the path arraylist
                     path.add(dot);
-
-                    //add the imageview to the layout
                     layout.addView(dot);
 
+                    xDotIncrement = getXDotIncrement();
+                    xDots+=xDotIncrement;
+                    xSpaceBetween=(float)(xDotIncrement*spaceBetween);
+
+                }
+
+                if(path.get(0).getY()>screenHeight){
                     //remove the first imageview from the path and from the layout
                     layout.removeView(path.get(0));
                     path.remove(0);
@@ -271,14 +267,12 @@ public class MainActivity extends AppCompatActivity  {
                     //remove and add the circleView imageview to always keep it on top
                     layout.removeView(circleView);
                     layout.addView(circleView);
-
-                    //increase the xDots by 1
-                    xDots++;
                 }
 
                 //shift all the dots downward
                 for (int i = 0;i<path.size();i++){
                     path.get(i).setY(path.get(i).getY()+pixelSpeed);
+
                 }
 
 
@@ -313,45 +307,49 @@ public class MainActivity extends AppCompatActivity  {
         });
     }
 
+    public static double getXDotIncrement(){
+        double xDotIncrement=0.1;
+        float function = convertDpToPixel(function(xDots+xDotIncrement), context)-convertDpToPixel(function(xDots), context);
+        double difference = Math.pow(spaceBetween+dotDrawable.getIntrinsicHeight(), 2)-(Math.pow(xDotIncrement*spaceBetween+dotDrawable.getIntrinsicHeight(),2)+Math.pow(function,2));
+        double minDifference=difference;
+        double minXDotIncrement=xDotIncrement;
+        while(xDotIncrement<=1){
+            function = convertDpToPixel(function(xDots+xDotIncrement), context)-convertDpToPixel(function(xDots), context);
+            difference = Math.pow(spaceBetween+dotDrawable.getIntrinsicHeight(), 2)-(Math.pow(xDotIncrement*spaceBetween+dotDrawable.getIntrinsicHeight(),2)+Math.pow(function,2));
+            if(Math.abs(difference)<Math.abs(minDifference)){
+                minDifference=difference;
+                minXDotIncrement=xDotIncrement;
+            }
+            xDotIncrement+=0.01;
+        }
+
+        return minXDotIncrement;
+
+    }
+
     //returns x position from centre in DP!!
-    public static float function(){
+    public static float[] function(double xDots){
         if (pathType.equals("straight")){
-            return 0;
+            float[] returnArray={0};
+            return returnArray;
+
         }
         else if (pathType.equals("diagonal")){
-            return (float)(xDots*diagonalPathSlope);
+            float[] returnArray= {(float)(xDots*diagonalPathSlope)};
+            return returnArray;
+        }
+        else if (pathType.equals("circles")){
+            float[] returnArray = {((float)Math.sqrt(Math.pow(circlesRadius,2)-Math.pow(xDots,2))), -1*((float)Math.sqrt(Math.pow(circlesRadius,2)-Math.pow(xDots,2)))};
+            return returnArray;
         }
         else {
-            return (float)(sineAmplitude*Math.sin(xDots*(2*Math.PI/sinePeriod)));
+            float[] returnArray = {(float)(sineAmplitude*Math.sin(xDots*(2*Math.PI/sinePeriod)))};
+            return returnArray;
         }
+
+
+
     }
-
-    //will decide the direction of the next path, taking the direction of the last path into account
-    public static String decidePathDirection(){
-        if (lastPathDirection.equals("straight")==false){
-            if (Math.random()>0.5){
-                return "straight";
-            }
-            else{
-                if (lastPathDirection.equals("left")){
-                    return "right";
-                }
-                else{
-                    return "left";
-                }
-            }
-        }
-        else{
-            if (Math.random()>0.5){
-                return "right";
-            }
-            else{
-                return "left";
-            }
-        }
-    }
-
-
 
 
 
